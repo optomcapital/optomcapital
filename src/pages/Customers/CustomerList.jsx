@@ -355,7 +355,8 @@ export default function CustomerList() {
 
       const { data, error } = await supabase.from('app_settings').select('value').eq('key', MESSAGE_TEMPLATE_KEY).maybeSingle()
       if (error) throw error
-      const next = String(data?.value || '')
+      if (!data) return
+      const next = String(data.value || '')
       setMessageTemplate(next)
       try {
         if (next.trim()) window.localStorage.setItem(MESSAGE_TEMPLATE_KEY, next)
@@ -605,6 +606,18 @@ export default function CustomerList() {
       columnHelper.accessor('name', {
         header: 'Customer Name',
         cell: (info) => <span className="font-medium">{info.getValue()}</span>,
+      }),
+      columnHelper.accessor('relationship_notes', {
+        header: 'Remarks',
+        cell: (info) => {
+          const v = String(info.getValue() || '').trim()
+          if (!v) return '—'
+          return (
+            <span className="block max-w-[240px] truncate" title={v}>
+              {v}
+            </span>
+          )
+        },
       }),
       columnHelper.accessor('entity_type', {
         header: 'Entity Type',
@@ -1354,7 +1367,7 @@ export default function CustomerList() {
           <Input label="Next Follow-up Date" type="date" {...register('next_followup_date')} />
         </div>
         <div className="mt-3">
-          <Textarea label="Relationship Notes" rows={3} {...register('relationship_notes')} />
+          <Textarea label="Remarks" rows={3} {...register('relationship_notes')} />
         </div>
 
         <Divider title="Cross-Sell" />
