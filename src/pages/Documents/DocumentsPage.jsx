@@ -104,6 +104,8 @@ export default function DocumentsPage() {
   const [loanType, setLoanType] = useState('')
   const [stage, setStage] = useState('')
   const [pendingOnly, setPendingOnly] = useState(false)
+  const [location, setLocation] = useState('')
+  const [locationOptions, setLocationOptions] = useState([{ value: '', label: 'All Locations' }])
 
   const [leads, setLeads] = useState([])
   const [docsByLeadId, setDocsByLeadId] = useState(new Map())
@@ -150,11 +152,12 @@ export default function DocumentsPage() {
     try {
       let query = supabase
         .from('leads')
-        .select('id, lead_code, loan_type, stage, customer_id, created_at, customer:customers(id, name, profession_type)', { count: 'exact' })
+        .select('id, lead_code, loan_type, stage, customer_id, created_at, customer:customers(id, name, profession_type, city)', { count: 'exact' })
         .order('created_at', { ascending: false })
 
       if (loanType) query = query.eq('loan_type', loanType)
       if (stage) query = query.eq('stage', stage)
+      if (location) query = query.eq('customer.city', location)
 
       const q = search.trim()
       if (q) query = query.or(`lead_code.ilike.%${q}%,customer.name.ilike.%${q}%`)
@@ -197,7 +200,29 @@ export default function DocumentsPage() {
     } finally {
       setLoading(false)
     }
-  }, [loanType, pageIndex, pageSize, search, stage])
+  }, [loanType, location, pageIndex, pageSize, search, stage])
+
+  const loadLocationOptions = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('customers')
+        .select('city')
+        .not('city', 'is', null)
+        .order('city', { ascending: true })
+        .range(0, 9999)
+      if (error) throw error
+      const unique = Array.from(
+        new Set(
+          (data || [])
+            .map((r) => String(r.city || '').trim())
+            .filter(Boolean),
+        ),
+      ).sort((a, b) => a.localeCompare(b))
+      setLocationOptions([{ value: '', label: 'All Locations' }, ...unique.map((c) => ({ value: c, label: c }))])
+    } catch {
+      setLocationOptions([{ value: '', label: 'All Locations' }])
+    }
+  }, [])
 
   async function upsertDocStatus(lead, documentType, nextStatus) {
     if (!lead?.id || !lead?.customer_id) return
@@ -228,6 +253,7 @@ export default function DocumentsPage() {
     return [
       columnHelper.accessor('lead_code', { header: 'Lead', cell: (info) => info.getValue() || '—' }),
       columnHelper.accessor((row) => row.customer?.name, { id: 'customer', header: 'Customer', cell: (info) => info.getValue() || '—' }),
+      columnHelper.accessor((row) => row.customer?.city, { id: 'location', header: 'Location', cell: (info) => info.getValue() || '—' }),
       columnHelper.accessor('loan_type', { header: 'Loan Type', cell: (info) => info.getValue() || '—' }),
       columnHelper.accessor('stage', { header: 'Stage', cell: (info) => info.getValue() || '—' }),
       columnHelper.display({
@@ -291,7 +317,11 @@ export default function DocumentsPage() {
 
   useEffect(() => {
     setPageIndex(0)
-  }, [search, loanType, stage, pendingOnly])
+  }, [search, loanType, stage, pendingOnly, location])
+
+  useEffect(() => {
+    loadLocationOptions()
+  }, [loadLocationOptions])
 
   useEffect(() => {
     const t = setTimeout(() => loadLeads(), 250)
@@ -329,7 +359,7 @@ export default function DocumentsPage() {
             { value: '1', label: 'Pending only' },
           ]}
         />
-        <div />
+        <Select value={location} onChange={(e) => setLocation(e.target.value)} options={locationOptions} />
       </div>
 
       <Table

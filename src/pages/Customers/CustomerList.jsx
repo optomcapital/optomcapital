@@ -89,6 +89,8 @@ export default function CustomerList() {
   const [employmentType, setEmploymentType] = useState('')
   const [customerType, setCustomerType] = useState('')
   const [productOffering, setProductOffering] = useState('')
+  const [location, setLocation] = useState('')
+  const [locationOptions, setLocationOptions] = useState([{ value: '', label: 'All Locations' }])
   const [pageIndex, setPageIndex] = useState(0)
   const [pageSize, setPageSize] = useState(25)
   const [totalCount, setTotalCount] = useState(0)
@@ -291,6 +293,7 @@ export default function CustomerList() {
       if (employmentType && !unsupportedCols.has('employment_type')) query = query.eq('employment_type', employmentType)
       if (customerType && !unsupportedCols.has('customer_type')) query = query.eq('customer_type', customerType)
       if (productOffering && !unsupportedCols.has('product_offering')) query = query.eq('product_offering', productOffering)
+      if (location) query = query.eq('city', location)
 
       const q = search.trim()
       if (q) {
@@ -319,6 +322,7 @@ export default function CustomerList() {
     customerType,
     employmentType,
     entityType,
+    location,
     pageIndex,
     pageSize,
     productOffering,
@@ -334,12 +338,38 @@ export default function CustomerList() {
 
   useEffect(() => {
     setPageIndex(0)
-  }, [search, searchBy, entityType, professionType, employmentType, customerType, productOffering])
+  }, [search, searchBy, entityType, professionType, employmentType, customerType, productOffering, location])
 
   useEffect(() => {
     const t = setTimeout(() => loadCustomers(), 250)
     return () => clearTimeout(t)
   }, [loadCustomers])
+
+  const loadLocationOptions = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('customers')
+        .select('city')
+        .not('city', 'is', null)
+        .order('city', { ascending: true })
+        .range(0, 9999)
+      if (error) throw error
+      const unique = Array.from(
+        new Set(
+          (data || [])
+            .map((r) => String(r.city || '').trim())
+            .filter(Boolean),
+        ),
+      ).sort((a, b) => a.localeCompare(b))
+      setLocationOptions([{ value: '', label: 'All Locations' }, ...unique.map((c) => ({ value: c, label: c }))])
+    } catch {
+      setLocationOptions([{ value: '', label: 'All Locations' }])
+    }
+  }, [])
+
+  useEffect(() => {
+    loadLocationOptions()
+  }, [loadLocationOptions])
 
   const loadMessageTemplate = useCallback(async () => {
     setTemplateLoading(true)
@@ -1034,7 +1064,13 @@ export default function CustomerList() {
 
     try {
       const op = async (nextPayload) => {
-        if (editing?.id) return supabase.from('customers').update(nextPayload).eq('id', editing.id)
+        if (editing?.id) {
+          const safe = { ...(nextPayload || {}) }
+          delete safe.id
+          delete safe.customer_code
+          delete safe.created_at
+          return supabase.from('customers').update(safe).eq('id', editing.id)
+        }
         return supabase.from('customers').insert([nextPayload])
       }
 
@@ -1091,7 +1127,7 @@ export default function CustomerList() {
         </div>
       </div>
 
-      <div className="grid grid-cols-9 gap-3">
+      <div className="grid grid-cols-10 gap-3">
         <Select
           value={searchBy}
           onChange={(e) => setSearchBy(e.target.value)}
@@ -1117,6 +1153,7 @@ export default function CustomerList() {
         </div>
         <Select value={entityType} onChange={(e) => setEntityType(e.target.value)} options={entityOptions} />
         <Select value={professionType} onChange={(e) => setProfessionType(e.target.value)} options={professionOptions} />
+        <Select value={location} onChange={(e) => setLocation(e.target.value)} options={locationOptions} />
         {unsupportedCols.has('employment_type') ? null : (
           <Select value={employmentType} onChange={(e) => setEmploymentType(e.target.value)} options={employmentTypeFilterOptions} />
         )}

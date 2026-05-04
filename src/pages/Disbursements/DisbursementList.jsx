@@ -25,6 +25,8 @@ export default function DisbursementList() {
   const [endDate, setEndDate] = useState('')
   const [bank, setBank] = useState('')
   const [payoutReceived, setPayoutReceived] = useState('')
+  const [location, setLocation] = useState('')
+  const [locationOptions, setLocationOptions] = useState([{ value: '', label: 'All Locations' }])
   const [pageIndex, setPageIndex] = useState(0)
   const [pageSize, setPageSize] = useState(25)
   const [totalCount, setTotalCount] = useState(0)
@@ -128,15 +130,38 @@ export default function DisbursementList() {
     }
   }, [])
 
+  const loadLocationOptions = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('customers')
+        .select('city')
+        .not('city', 'is', null)
+        .order('city', { ascending: true })
+        .range(0, 9999)
+      if (error) throw error
+      const unique = Array.from(
+        new Set(
+          (data || [])
+            .map((r) => String(r.city || '').trim())
+            .filter(Boolean),
+        ),
+      ).sort((a, b) => a.localeCompare(b))
+      setLocationOptions([{ value: '', label: 'All Locations' }, ...unique.map((c) => ({ value: c, label: c }))])
+    } catch {
+      setLocationOptions([{ value: '', label: 'All Locations' }])
+    }
+  }, [])
+
   const loadSummary = useCallback(async () => {
     try {
       let base = supabase
         .from('disbursements')
-        .select('id, bank_application:bank_applications(bank_name)', { count: 'exact', head: true })
+        .select('id, bank_application:bank_applications(bank_name), lead:leads(customer:customers(city))', { count: 'exact', head: true })
       if (startDate) base = base.gte('disbursement_date', startDate)
       if (endDate) base = base.lte('disbursement_date', endDate)
       if (payoutReceived) base = base.eq('payout_received', payoutReceived === 'true')
       if (bank) base = base.eq('bank_application.bank_name', bank)
+      if (location) base = base.eq('lead.customer.city', location)
 
       const countRes = await base
       if (countRes.error) throw countRes.error
@@ -156,11 +181,14 @@ export default function DisbursementList() {
         const to = Math.min(from + pageSize - 1, total - 1)
         let q = supabase
           .from('disbursements')
-          .select('final_disbursed_amount, gross_revenue, net_revenue, payment_pending, bank_application:bank_applications(bank_name)')
+          .select(
+            'final_disbursed_amount, gross_revenue, net_revenue, payment_pending, bank_application:bank_applications(bank_name), lead:leads(customer:customers(city))',
+          )
         if (startDate) q = q.gte('disbursement_date', startDate)
         if (endDate) q = q.lte('disbursement_date', endDate)
         if (payoutReceived) q = q.eq('payout_received', payoutReceived === 'true')
         if (bank) q = q.eq('bank_application.bank_name', bank)
+        if (location) q = q.eq('lead.customer.city', location)
         const pageRes = await q.order('disbursement_date', { ascending: false }).range(from, to)
         if (pageRes.error) throw pageRes.error
         ;(pageRes.data || []).forEach((r) => {
@@ -175,20 +203,24 @@ export default function DisbursementList() {
     } catch {
       setSummary({ totalDisbursed: 0, gross: 0, net: 0, pending: 0 })
     }
-  }, [bank, endDate, payoutReceived, startDate])
+  }, [bank, endDate, location, payoutReceived, startDate])
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
       let query = supabase
         .from('disbursements')
-        .select('*, lead:leads(id, lead_code, customer:customers(id, name)), bank_application:bank_applications(id, bank_name)', { count: 'exact' })
+        .select(
+          '*, lead:leads(id, lead_code, customer:customers(id, name, city)), bank_application:bank_applications(id, bank_name)',
+          { count: 'exact' },
+        )
         .order('disbursement_date', { ascending: false })
 
       if (startDate) query = query.gte('disbursement_date', startDate)
       if (endDate) query = query.lte('disbursement_date', endDate)
       if (payoutReceived) query = query.eq('payout_received', payoutReceived === 'true')
       if (bank) query = query.eq('bank_application.bank_name', bank)
+      if (location) query = query.eq('lead.customer.city', location)
 
       const from = pageIndex * pageSize
       const to = from + pageSize - 1
@@ -204,16 +236,17 @@ export default function DisbursementList() {
     } finally {
       setLoading(false)
     }
-  }, [bank, endDate, pageIndex, pageSize, payoutReceived, startDate])
+  }, [bank, endDate, location, pageIndex, pageSize, payoutReceived, startDate])
 
   useEffect(() => {
     loadBankOptions()
+    loadLocationOptions()
     load()
-  }, [load, loadBankOptions])
+  }, [load, loadBankOptions, loadLocationOptions])
 
   useEffect(() => {
     setPageIndex(0)
-  }, [startDate, endDate, bank, payoutReceived])
+  }, [startDate, endDate, bank, payoutReceived, location])
 
   useEffect(() => {
     const t = setTimeout(() => load(), 250)
@@ -294,6 +327,7 @@ export default function DisbursementList() {
     return [
       columnHelper.accessor((row) => row.lead?.lead_code, { id: 'lead', header: 'Lead ID', cell: (info) => info.getValue() || '—' }),
       columnHelper.accessor((row) => row.lead?.customer?.name, { id: 'customer', header: 'Customer', cell: (info) => info.getValue() || '—' }),
+      columnHelper.accessor((row) => row.lead?.customer?.city, { id: 'location', header: 'Location', cell: (info) => info.getValue() || '—' }),
       columnHelper.accessor((row) => row.bank_application?.bank_name, { id: 'bank', header: 'Bank', cell: (info) => info.getValue() || '—' }),
       columnHelper.accessor('final_disbursed_amount', { header: 'Disbursed', cell: (info) => formatINR(info.getValue()) }),
       columnHelper.accessor('disbursement_date', { header: 'Date', cell: (info) => formatDate(info.getValue()) }),
@@ -467,6 +501,7 @@ export default function DisbursementList() {
       <div className="grid grid-cols-6 gap-3">
         <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
         <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+        <Select value={location} onChange={(e) => setLocation(e.target.value)} options={locationOptions} />
         <Select value={bank} onChange={(e) => setBank(e.target.value)} options={[{ value: '', label: 'All Banks' }, ...banks.map((b) => ({ value: b, label: b }))]} />
         <Select
           value={payoutReceived}
@@ -477,7 +512,7 @@ export default function DisbursementList() {
             { value: 'false', label: 'Not Received' },
           ]}
         />
-        <div className="col-span-2" />
+        <div />
       </div>
 
       <Table

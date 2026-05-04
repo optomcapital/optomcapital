@@ -84,6 +84,8 @@ export default function LeadList() {
   const [leadStatusCategory, setLeadStatusCategory] = useState('')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
+  const [location, setLocation] = useState('')
+  const [locationOptions, setLocationOptions] = useState([{ value: '', label: 'All Locations' }])
   const [pageIndex, setPageIndex] = useState(0)
   const [pageSize, setPageSize] = useState(25)
   const [totalCount, setTotalCount] = useState(0)
@@ -191,13 +193,35 @@ export default function LeadList() {
     }
   }, [])
 
+  const loadLocationOptions = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('customers')
+        .select('city')
+        .not('city', 'is', null)
+        .order('city', { ascending: true })
+        .range(0, 9999)
+      if (error) throw error
+      const unique = Array.from(
+        new Set(
+          (data || [])
+            .map((r) => String(r.city || '').trim())
+            .filter(Boolean),
+        ),
+      ).sort((a, b) => a.localeCompare(b))
+      setLocationOptions([{ value: '', label: 'All Locations' }, ...unique.map((c) => ({ value: c, label: c }))])
+    } catch {
+      setLocationOptions([{ value: '', label: 'All Locations' }])
+    }
+  }, [])
+
   const loadLeads = useCallback(async () => {
     setLoading(true)
     try {
       const run = async (includeLeadStatus) => {
         const selectFields = includeLeadStatus
-          ? 'id, lead_code, loan_type, required_amount, stage, urgency_level, lead_status_category, lead_status_stage, sales_manager_name, lead_creation_date, customer:customers(id, name)'
-          : 'id, lead_code, loan_type, required_amount, stage, urgency_level, sales_manager_name, lead_creation_date, customer:customers(id, name)'
+          ? 'id, lead_code, loan_type, required_amount, stage, urgency_level, lead_status_category, lead_status_stage, sales_manager_name, lead_creation_date, customer:customers(id, name, city)'
+          : 'id, lead_code, loan_type, required_amount, stage, urgency_level, sales_manager_name, lead_creation_date, customer:customers(id, name, city)'
 
         let query = supabase.from('leads').select(selectFields, { count: 'exact' }).order('created_at', { ascending: false })
 
@@ -207,6 +231,7 @@ export default function LeadList() {
         if (includeLeadStatus && leadStatusCategory) query = query.eq('lead_status_category', leadStatusCategory)
         if (startDate) query = query.gte('lead_creation_date', startDate)
         if (endDate) query = query.lte('lead_creation_date', endDate)
+        if (location) query = query.eq('customer.city', location)
 
         const q = search.trim()
         if (q) {
@@ -276,6 +301,7 @@ export default function LeadList() {
     endDate,
     leadStatusCategory,
     leadStatusSupported,
+    location,
     loanType,
     markLeadStatusSupported,
     markLeadStatusUnsupported,
@@ -290,12 +316,13 @@ export default function LeadList() {
 
   useEffect(() => {
     loadCustomers()
+    loadLocationOptions()
     loadLeads()
-  }, [loadCustomers, loadLeads])
+  }, [loadCustomers, loadLeads, loadLocationOptions])
 
   useEffect(() => {
     setPageIndex(0)
-  }, [search, searchBy, loanType, stage, urgency, leadStatusCategory, startDate, endDate])
+  }, [search, searchBy, loanType, stage, urgency, leadStatusCategory, startDate, endDate, location])
 
   useEffect(() => {
     const t = setTimeout(() => loadLeads(), 250)
@@ -309,6 +336,11 @@ export default function LeadList() {
         id: 'customer',
         header: 'Customer',
         cell: (info) => <span className="font-medium">{info.getValue() || '—'}</span>,
+      }),
+      columnHelper.accessor((row) => row.customer?.city, {
+        id: 'location',
+        header: 'Location',
+        cell: (info) => info.getValue() || '—',
       }),
       columnHelper.accessor('loan_type', {
         header: 'Loan Type',
@@ -445,7 +477,11 @@ export default function LeadList() {
     try {
       const run = async (p) => {
         if (editing?.id) {
-          const { error } = await supabase.from('leads').update(p).eq('id', editing.id)
+          const safe = { ...(p || {}) }
+          delete safe.id
+          delete safe.lead_code
+          delete safe.created_at
+          const { error } = await supabase.from('leads').update(safe).eq('id', editing.id)
           if (error) throw error
           toast.success('Lead updated')
         } else {
@@ -542,7 +578,8 @@ export default function LeadList() {
       <div className="grid grid-cols-6 gap-3">
         <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
         <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-        <div className="col-span-4" />
+        <Select value={location} onChange={(e) => setLocation(e.target.value)} options={locationOptions} />
+        <div className="col-span-3" />
       </div>
 
       <Table

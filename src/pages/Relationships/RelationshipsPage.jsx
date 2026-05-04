@@ -28,6 +28,8 @@ export default function RelationshipsPage() {
   const [rows, setRows] = useState([])
   const [searchBy, setSearchBy] = useState('')
   const [search, setSearch] = useState('')
+  const [locationFilter, setLocationFilter] = useState('')
+  const [locationOptions, setLocationOptions] = useState([{ value: '', label: 'All Locations' }])
   const [pageIndex, setPageIndex] = useState(0)
   const [pageSize, setPageSize] = useState(25)
   const [totalCount, setTotalCount] = useState(0)
@@ -263,6 +265,8 @@ export default function RelationshipsPage() {
         .select('*')
         .order('created_at', { ascending: false })
 
+      if (supportsLocation && locationFilter) masterQuery = masterQuery.eq('location', locationFilter)
+
       if (q) {
         if (searchBy === 'bank') masterQuery = masterQuery.ilike('bank_name', `%${q}%`)
         else if (searchBy === 'rm') masterQuery = masterQuery.ilike('rm_name', `%${q}%`)
@@ -278,6 +282,18 @@ export default function RelationshipsPage() {
         throw masterError
       }
       const masterRows = masterData || []
+      if (supportsLocation) {
+        const unique = Array.from(
+          new Set(
+            masterRows
+              .map((r) => String(r.location || '').trim())
+              .filter(Boolean),
+          ),
+        ).sort((a, b) => a.localeCompare(b))
+        setLocationOptions([{ value: '', label: 'All Locations' }, ...unique.map((v) => ({ value: v, label: v }))])
+      } else {
+        setLocationOptions([{ value: '', label: 'All Locations' }])
+      }
 
       let derivedRows = []
       if (!(q && searchBy === 'email')) {
@@ -338,12 +354,13 @@ export default function RelationshipsPage() {
         merged.push(r)
       })
 
+      const filtered = supportsLocation && locationFilter ? merged.filter((r) => String(r.location || '').trim() === locationFilter) : merged
       const from = pageIndex * pageSize
       const to = from + pageSize
-      setRows(merged.slice(from, to))
-      setTotalCount(merged.length)
-      setPageCount(Math.max(1, Math.ceil(merged.length / pageSize)))
-      setShowingDerived(merged.some((r) => r.__derived))
+      setRows(filtered.slice(from, to))
+      setTotalCount(filtered.length)
+      setPageCount(Math.max(1, Math.ceil(filtered.length / pageSize)))
+      setShowingDerived(filtered.some((r) => r.__derived))
     } catch (e) {
       toast.error(e?.message || 'Failed to load relationships')
       setRows([])
@@ -353,11 +370,11 @@ export default function RelationshipsPage() {
     } finally {
       setLoading(false)
     }
-  }, [pageIndex, pageSize, search, searchBy])
+  }, [locationFilter, pageIndex, pageSize, search, searchBy, supportsLocation])
 
   useEffect(() => {
     setPageIndex(0)
-  }, [search, searchBy])
+  }, [search, searchBy, locationFilter])
 
   useEffect(() => {
     const t = setTimeout(() => loadRows(), 250)
@@ -649,7 +666,7 @@ export default function RelationshipsPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-6 gap-3">
+      <div className="grid grid-cols-7 gap-3">
         <Select
           value={searchBy}
           onChange={(e) => setSearchBy(e.target.value)}
@@ -661,13 +678,19 @@ export default function RelationshipsPage() {
             { value: 'email', label: 'Search: Email' },
           ]}
         />
-        <div className="col-span-4">
+        <div className="col-span-3">
           <Input
             placeholder="Search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
+        <Select
+          value={locationFilter}
+          onChange={(e) => setLocationFilter(e.target.value)}
+          options={locationOptions}
+          disabled={!supportsLocation}
+        />
         <Select
           value={String(pageSize)}
           onChange={(e) => setPageSize(Number(e.target.value))}
