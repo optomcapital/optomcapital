@@ -259,6 +259,11 @@ export default function RelationshipsPage() {
       const q = search.trim()
       const makeKey = (bank, rm, contact) =>
         `${String(bank || '').trim().toLowerCase()}|${String(rm || '').trim().toLowerCase()}|${String(contact || '').trim()}`
+      const getApplicationCity = (row) => {
+        const lead = Array.isArray(row?.lead) ? row.lead[0] : row?.lead
+        const customer = Array.isArray(lead?.customer) ? lead.customer[0] : lead?.customer
+        return String(customer?.city || '').trim()
+      }
 
       let masterData = null
       let masterError = null
@@ -268,8 +273,6 @@ export default function RelationshipsPage() {
           .from('bank_relationships')
           .select('*')
           .order('created_at', { ascending: false })
-
-        if (supportsLocation && locationFilter) mq = mq.eq('location', locationFilter)
 
         if (q) {
           if (searchBy === 'bank') mq = mq.ilike('bank_name', `%${q}%`)
@@ -299,24 +302,13 @@ export default function RelationshipsPage() {
         throw masterError
       }
       const masterRows = masterData || []
-      if (supportsLocation) {
-        const unique = Array.from(
-          new Set(
-            masterRows
-              .map((r) => String(r.location || '').trim())
-              .filter(Boolean),
-          ),
-        ).sort((a, b) => a.localeCompare(b))
-        setLocationOptions([{ value: '', label: 'All Locations' }, ...unique.map((v) => ({ value: v, label: v }))])
-      } else {
-        setLocationOptions([{ value: '', label: 'All Locations' }])
-      }
+      const appCityByKey = new Map()
 
       let derivedRows = []
       if (!(q && searchBy === 'email')) {
         let derivedQuery = supabase
           .from('bank_applications')
-          .select('bank_name, bank_rm_name, rm_contact, created_at')
+          .select('bank_name, bank_rm_name, rm_contact, created_at, lead:leads(customer:customers(city))')
           .order('created_at', { ascending: false })
 
         if (q) {
@@ -334,8 +326,10 @@ export default function RelationshipsPage() {
           const bank = (a.bank_name || '').trim()
           const rm = (a.bank_rm_name || '').trim()
           const contact = (a.rm_contact || '').trim()
+          const city = getApplicationCity(a)
           if (!bank && !rm && !contact) return []
           const key = makeKey(bank, rm, contact)
+          if (city && !appCityByKey.has(key)) appCityByKey.set(key, city)
           if (seenDerived.has(key)) return []
           seenDerived.add(key)
           return [
@@ -344,7 +338,7 @@ export default function RelationshipsPage() {
               bank_name: bank || null,
               rm_name: rm || null,
               designation: null,
-              location: null,
+              location: city || null,
               rm_contact: contact || null,
               rm_email: null,
               product_handled: null,
@@ -362,7 +356,9 @@ export default function RelationshipsPage() {
         const key = makeKey(r.bank_name, r.rm_name, r.rm_contact)
         if (seen.has(key)) return
         seen.add(key)
-        merged.push(r)
+        const directLocation = String(r.location || r.city || '').trim()
+        const fallbackLocation = String(appCityByKey.get(key) || '').trim()
+        merged.push({ ...r, location: directLocation || fallbackLocation || null })
       })
       derivedRows.forEach((r) => {
         const key = makeKey(r.bank_name, r.rm_name, r.rm_contact)
@@ -388,6 +384,74 @@ export default function RelationshipsPage() {
       setLoading(false)
     }
   }, [extractMissingColumn, locationFilter, markUnsupported, pageIndex, pageSize, search, searchBy, supportsLocation])
+  const loadLocationOptions = useCallback(async () => {
+    if (!supportsLocation) {
+      setLocationOptions([{ value: '', label: 'All Locations' }])
+      return
+    }
+
+    try {
+      const makeKey = (bank, rm, contact) =>
+        `${String(bank || '').trim().toLowerCase()}|${String(rm || '').trim().toLowerCase()}|${String(contact || '').trim()}`
+      const getApplicationCity = (row) => {
+        const lead = Array.isArray(row?.lead) ? row.lead[0] : row?.lead
+        const customer = Array.isArray(lead?.customer) ? lead.customer[0] : lead?.customer
+        return String(customer?.city || '').trim()
+      }
+
+      const { data, error } = await supabase
+        .from('bank_relationships')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .range(0, 9999)
+
+      if (error) {
+        const missing = extractMissingColumn(error)
+        if (missing) {
+          markUnsupported(missing)
+          setLocationOptions([{ value: '', label: 'All Locations' }])
+          return
+        }
+        throw error
+      }
+      const appCityByKey = new Map()
+      const derivedRes = await supabase
+        .from('bank_applications')
+        .select('bank_name, bank_rm_name, rm_contact, lead:leads(customer:customers(city))')
+        .order('created_at', { ascending: false })
+        .range(0, 9999)
+      if (!derivedRes.error) {
+        ;(derivedRes.data || []).forEach((a) => {
+          const bank = (a.bank_name || '').trim()
+          const rm = (a.bank_rm_name || '').trim()
+          const contact = (a.rm_contact || '').trim()
+          const city = getApplicationCity(a)
+          if (!city) return
+          const key = makeKey(bank, rm, contact)
+          if (!appCityByKey.has(key)) appCityByKey.set(key, city)
+        })
+      }
+
+      const unique = Array.from(
+        new Set(
+          [
+            ...(data || []).map((r) => {
+              const key = makeKey(r.bank_name, r.rm_name, r.rm_contact)
+              return String(r.location || r.city || appCityByKey.get(key) || '').trim()
+            }),
+            ...Array.from(appCityByKey.values()).map((v) => String(v || '').trim()),
+          ].filter(Boolean),
+        ),
+      ).sort((a, b) => a.localeCompare(b))
+      setLocationOptions([{ value: '', label: 'All Locations' }, ...unique.map((v) => ({ value: v, label: v }))])
+    } catch {
+      setLocationOptions([{ value: '', label: 'All Locations' }])
+    }
+  }, [extractMissingColumn, markUnsupported, supportsLocation])
+
+  useEffect(() => {
+    loadLocationOptions()
+  }, [loadLocationOptions])
 
   useEffect(() => {
     setPageIndex(0)
