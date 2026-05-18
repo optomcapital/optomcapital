@@ -60,65 +60,16 @@ export default function RelationshipsPage() {
     },
   })
 
+  // Clear stale unsupported-column cache on mount so columns are re-enabled.
+  // If a column truly doesn't exist, the save() error handling will re-mark it.
   useEffect(() => {
-    let cancelled = false
-
-    async function initAndRevalidate() {
-      // Load cached unsupported columns from localStorage
-      let cached = new Set()
-      try {
-        const raw = window.localStorage.getItem(REL_SCHEMA_UNSUPPORTED_KEY)
-        if (raw) {
-          const parsed = JSON.parse(raw)
-          if (Array.isArray(parsed)) cached = new Set(parsed.filter(Boolean).map((c) => String(c)))
-        }
-      } catch (e) {
-        void e
-      }
-
-      if (cached.size === 0) {
-        if (!cancelled) setUnsupportedCols(new Set())
-        return
-      }
-
-      // Re-validate each cached column by probing the DB.
-      // If the column has since been added, remove it from the unsupported set.
-      const stillUnsupported = new Set()
-      for (const col of cached) {
-        try {
-          const { error } = await supabase
-            .from('bank_relationships')
-            .select(col)
-            .limit(1)
-          if (error) {
-            const missing = extractMissingColumn(error)
-            if (missing) stillUnsupported.add(missing)
-            else stillUnsupported.add(col)
-          }
-          // No error = column exists now, don't re-add to unsupported
-        } catch {
-          stillUnsupported.add(col)
-        }
-      }
-
-      if (cancelled) return
-
-      setUnsupportedCols(stillUnsupported)
-      // Persist the revalidated set
-      try {
-        if (stillUnsupported.size > 0) {
-          window.localStorage.setItem(REL_SCHEMA_UNSUPPORTED_KEY, JSON.stringify(Array.from(stillUnsupported)))
-        } else {
-          window.localStorage.removeItem(REL_SCHEMA_UNSUPPORTED_KEY)
-        }
-      } catch (e) {
-        void e
-      }
+    try {
+      window.localStorage.removeItem(REL_SCHEMA_UNSUPPORTED_KEY)
+    } catch (e) {
+      void e
     }
-
-    initAndRevalidate()
-    return () => { cancelled = true }
-  }, [REL_SCHEMA_UNSUPPORTED_KEY, extractMissingColumn])
+    setUnsupportedCols(new Set())
+  }, [REL_SCHEMA_UNSUPPORTED_KEY])
 
   const persistUnsupportedCols = useCallback(
     (nextSet) => {
@@ -309,22 +260,39 @@ export default function RelationshipsPage() {
       const makeKey = (bank, rm, contact) =>
         `${String(bank || '').trim().toLowerCase()}|${String(rm || '').trim().toLowerCase()}|${String(contact || '').trim()}`
 
-      let masterQuery = supabase
-        .from('bank_relationships')
-        .select('*')
-        .order('created_at', { ascending: false })
+      let masterData = null
+      let masterError = null
 
-      if (supportsLocation && locationFilter) masterQuery = masterQuery.eq('location', locationFilter)
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        let mq = supabase
+          .from('bank_relationships')
+          .select('*')
+          .order('created_at', { ascending: false })
 
-      if (q) {
-        if (searchBy === 'bank') masterQuery = masterQuery.ilike('bank_name', `%${q}%`)
-        else if (searchBy === 'rm') masterQuery = masterQuery.ilike('rm_name', `%${q}%`)
-        else if (searchBy === 'contact') masterQuery = masterQuery.ilike('rm_contact', `%${q}%`)
-        else if (searchBy === 'email') masterQuery = masterQuery.ilike('rm_email', `%${q}%`)
-        else masterQuery = masterQuery.or(`bank_name.ilike.%${q}%,rm_name.ilike.%${q}%,rm_contact.ilike.%${q}%,rm_email.ilike.%${q}%`)
+        if (supportsLocation && locationFilter) mq = mq.eq('location', locationFilter)
+
+        if (q) {
+          if (searchBy === 'bank') mq = mq.ilike('bank_name', `%${q}%`)
+          else if (searchBy === 'rm') mq = mq.ilike('rm_name', `%${q}%`)
+          else if (searchBy === 'contact') mq = mq.ilike('rm_contact', `%${q}%`)
+          else if (searchBy === 'email') mq = mq.ilike('rm_email', `%${q}%`)
+          else mq = mq.or(`bank_name.ilike.%${q}%,rm_name.ilike.%${q}%,rm_contact.ilike.%${q}%,rm_email.ilike.%${q}%`)
+        }
+
+        const res = await mq.range(0, 4999)
+        masterData = res.data
+        masterError = res.error
+
+        if (masterError) {
+          const missing = extractMissingColumn(masterError)
+          if (missing) {
+            markUnsupported(missing)
+            continue // retry without the problematic column
+          }
+        }
+        break
       }
 
-      const { data: masterData, error: masterError } = await masterQuery.range(0, 4999)
       if (masterError && isPermissionOrSchemaError(masterError)) {
         toast.error(`RM master table access issue: ${masterError?.message || 'Check RLS/policies'}`)
       } else if (masterError) {
@@ -419,7 +387,7 @@ export default function RelationshipsPage() {
     } finally {
       setLoading(false)
     }
-  }, [locationFilter, pageIndex, pageSize, search, searchBy, supportsLocation])
+  }, [extractMissingColumn, locationFilter, markUnsupported, pageIndex, pageSize, search, searchBy, supportsLocation])
 
   useEffect(() => {
     setPageIndex(0)
