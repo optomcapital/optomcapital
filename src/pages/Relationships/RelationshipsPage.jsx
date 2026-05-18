@@ -61,15 +61,64 @@ export default function RelationshipsPage() {
   })
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(REL_SCHEMA_UNSUPPORTED_KEY)
-      if (!raw) return
-      const parsed = JSON.parse(raw)
-      if (Array.isArray(parsed)) setUnsupportedCols(new Set(parsed.filter(Boolean).map((c) => String(c))))
-    } catch (e) {
-      void e
+    let cancelled = false
+
+    async function initAndRevalidate() {
+      // Load cached unsupported columns from localStorage
+      let cached = new Set()
+      try {
+        const raw = window.localStorage.getItem(REL_SCHEMA_UNSUPPORTED_KEY)
+        if (raw) {
+          const parsed = JSON.parse(raw)
+          if (Array.isArray(parsed)) cached = new Set(parsed.filter(Boolean).map((c) => String(c)))
+        }
+      } catch (e) {
+        void e
+      }
+
+      if (cached.size === 0) {
+        if (!cancelled) setUnsupportedCols(new Set())
+        return
+      }
+
+      // Re-validate each cached column by probing the DB.
+      // If the column has since been added, remove it from the unsupported set.
+      const stillUnsupported = new Set()
+      for (const col of cached) {
+        try {
+          const { error } = await supabase
+            .from('bank_relationships')
+            .select(col)
+            .limit(1)
+          if (error) {
+            const missing = extractMissingColumn(error)
+            if (missing) stillUnsupported.add(missing)
+            else stillUnsupported.add(col)
+          }
+          // No error = column exists now, don't re-add to unsupported
+        } catch {
+          stillUnsupported.add(col)
+        }
+      }
+
+      if (cancelled) return
+
+      setUnsupportedCols(stillUnsupported)
+      // Persist the revalidated set
+      try {
+        if (stillUnsupported.size > 0) {
+          window.localStorage.setItem(REL_SCHEMA_UNSUPPORTED_KEY, JSON.stringify(Array.from(stillUnsupported)))
+        } else {
+          window.localStorage.removeItem(REL_SCHEMA_UNSUPPORTED_KEY)
+        }
+      } catch (e) {
+        void e
+      }
     }
-  }, [REL_SCHEMA_UNSUPPORTED_KEY])
+
+    initAndRevalidate()
+    return () => { cancelled = true }
+  }, [REL_SCHEMA_UNSUPPORTED_KEY, extractMissingColumn])
 
   const persistUnsupportedCols = useCallback(
     (nextSet) => {

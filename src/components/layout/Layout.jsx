@@ -12,6 +12,7 @@ import {
   Kanban,
   LayoutDashboard,
   LogOut,
+  Settings,
   Users,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -28,6 +29,7 @@ const navItems = [
   { to: '/disbursements', label: 'Disbursements', icon: IndianRupee },
   { to: '/documents', label: 'Documents', icon: FolderOpen },
   { to: '/reports', label: 'Reports', icon: BarChart2 },
+  { to: '/settings', label: 'Settings', icon: Settings },
 ]
 
 export default function Layout() {
@@ -126,6 +128,7 @@ export default function Layout() {
     if (parts[0] === 'relationships') items.push({ label: 'Relationships' })
     if (parts[0] === 'disbursements') items.push({ label: 'Disbursements' })
     if (parts[0] === 'reports') items.push({ label: 'Reports' })
+    if (parts[0] === 'settings') items.push({ label: 'Settings' })
 
     return items
   }, [location.pathname])
