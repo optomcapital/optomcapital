@@ -1,9 +1,9 @@
 import { Eye, EyeOff } from 'lucide-react'
-import { forwardRef, useState } from 'react'
+import { forwardRef, useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import toast from 'react-hot-toast'
 import { useAuth } from '../../context/AuthContext.jsx'
-import { Button, Card } from '../../components/ui/index.jsx'
+import { Button, Card, Input } from '../../components/ui/index.jsx'
 import { supabase, supabaseConfigured } from '../../lib/supabase.js'
 
 const PasswordField = forwardRef(function PasswordField({ label, show, onToggle, error, ...props }, ref) {
@@ -39,6 +39,14 @@ export default function SettingsPage() {
   const [showCurrentPw, setShowCurrentPw] = useState(false)
   const [showNewPw, setShowNewPw] = useState(false)
   const [showConfirmPw, setShowConfirmPw] = useState(false)
+  const [showEmailPw, setShowEmailPw] = useState(false)
+
+  const emailForm = useForm({
+    defaultValues: {
+      email: user?.email || '',
+      current_password: '',
+    },
+  })
 
   const {
     register,
@@ -56,6 +64,55 @@ export default function SettingsPage() {
 
   const newPassword = watch('new_password')
 
+  useEffect(() => {
+    emailForm.reset((prev) => ({
+      ...prev,
+      email: user?.email || '',
+      current_password: '',
+    }))
+  }, [emailForm, user?.email])
+
+  async function verifyCurrentPassword(password) {
+    if (!supabaseConfigured) return
+    const { error } = await supabase.auth.signInWithPassword({
+      email: user?.email,
+      password,
+    })
+    if (error) throw new Error('Current password is incorrect')
+  }
+
+  async function onChangeEmail(values) {
+    try {
+      const nextEmail = String(values.email || '').trim().toLowerCase()
+      if (!nextEmail) {
+        toast.error('Email is required')
+        return
+      }
+      if (nextEmail === String(user?.email || '').trim().toLowerCase()) {
+        toast.error('New email must be different from current email')
+        return
+      }
+
+      if (!supabaseConfigured) {
+        toast.success('Email updated (guest mode)')
+        emailForm.reset({ email: nextEmail, current_password: '' })
+        return
+      }
+
+      await verifyCurrentPassword(values.current_password)
+
+      const { error } = await supabase.auth.updateUser({
+        email: nextEmail,
+      })
+      if (error) throw error
+
+      toast.success('Email update requested. Please verify from your inbox if confirmation is enabled.')
+      emailForm.reset({ email: nextEmail, current_password: '' })
+    } catch (e) {
+      toast.error(e?.message || 'Failed to update email')
+    }
+  }
+
   async function onChangePassword(values) {
     try {
       if (!supabaseConfigured) {
@@ -64,17 +121,8 @@ export default function SettingsPage() {
         return
       }
 
-      // Verify current password by re-signing in
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email: user?.email,
-        password: values.current_password,
-      })
-      if (signInError) {
-        toast.error('Current password is incorrect')
-        return
-      }
+      await verifyCurrentPassword(values.current_password)
 
-      // Update password via Supabase auth
       const { error } = await supabase.auth.updateUser({
         password: values.new_password,
       })
@@ -120,7 +168,39 @@ export default function SettingsPage() {
         </div>
       </Card>
 
-      {/* Change Password */}
+      <Card title="Change Email">
+        <form onSubmit={emailForm.handleSubmit(onChangeEmail)} className="space-y-4">
+          <Input
+            label="New Email"
+            type="email"
+            autoComplete="email"
+            error={emailForm.formState.errors.email?.message}
+            {...emailForm.register('email', {
+              required: 'Email is required',
+              pattern: {
+                value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+                message: 'Enter a valid email address',
+              },
+            })}
+          />
+          <PasswordField
+            label="Current Password"
+            show={showEmailPw}
+            onToggle={() => setShowEmailPw((v) => !v)}
+            error={emailForm.formState.errors.current_password?.message}
+            {...emailForm.register('current_password', { required: 'Current password is required' })}
+          />
+          <div className="rounded-md border border-border-divider bg-bg px-3 py-2 text-[12px] text-text-secondary">
+            If email confirmation is enabled in Supabase, the new email will become active only after verification.
+          </div>
+          <div className="flex justify-end pt-2">
+            <Button type="submit" disabled={emailForm.formState.isSubmitting}>
+              {emailForm.formState.isSubmitting ? 'Updating…' : 'Update Email'}
+            </Button>
+          </div>
+        </form>
+      </Card>
+
       <Card title="Change Password">
         <form onSubmit={handleSubmit(onChangePassword)} className="space-y-4">
           <PasswordField
