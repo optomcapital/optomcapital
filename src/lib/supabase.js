@@ -1161,6 +1161,13 @@ export async function deleteBankApplicationCascade(bankApplicationId) {
   if (error) throw error
 }
 
+export async function deleteBankApplicationsCascade(bankApplicationIds) {
+  const ids = (bankApplicationIds || []).filter(Boolean)
+  if (!ids.length) return
+  await deleteWhereIn('disbursements', 'bank_application_id', ids)
+  await deleteWhereIn('bank_applications', 'id', ids)
+}
+
 export async function deleteLeadCascade(leadId) {
   if (!leadId) throw new Error('Missing lead id')
   const { error: docErr } = await supabase.from('documents').delete().eq('lead_id', leadId)
@@ -1227,4 +1234,42 @@ export async function getCurrentUser() {
 
 export function onAuthStateChange(callback) {
   return supabase.auth.onAuthStateChange((_event, session) => callback(session))
+}
+
+// --- Two-Factor Auth (TOTP via Supabase Auth MFA) ---
+// Even with dashboard/DB access to auth.users, a hashed password alone cannot
+// sign a session in past aal2 without the user's enrolled authenticator code.
+export async function getMfaAssuranceLevel() {
+  if (!supabaseConfigured) return { currentLevel: 'aal1', nextLevel: 'aal1' }
+  const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+  if (error) throw error
+  return data
+}
+
+export async function listMfaFactors() {
+  if (!supabaseConfigured) return []
+  const { data, error } = await supabase.auth.mfa.listFactors()
+  if (error) throw error
+  return data?.totp || []
+}
+
+export async function enrollMfaFactor() {
+  const { data, error } = await supabase.auth.mfa.enroll({ factorType: 'totp' })
+  if (error) throw error
+  return data
+}
+
+export async function challengeAndVerifyMfaFactor(factorId, code) {
+  if (!factorId) throw new Error('Missing MFA factor')
+  const challenge = await supabase.auth.mfa.challenge({ factorId })
+  if (challenge.error) throw challenge.error
+  const verify = await supabase.auth.mfa.verify({ factorId, challengeId: challenge.data.id, code })
+  if (verify.error) throw verify.error
+  return verify.data
+}
+
+export async function unenrollMfaFactor(factorId) {
+  if (!factorId) throw new Error('Missing MFA factor')
+  const { error } = await supabase.auth.mfa.unenroll({ factorId })
+  if (error) throw error
 }

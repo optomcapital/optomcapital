@@ -5,7 +5,7 @@ import toast from 'react-hot-toast'
 import { useForm } from 'react-hook-form'
 import { Link } from 'react-router-dom'
 import { Badge, Button, ConfirmDialog, Drawer, Input, Select, Table, Textarea } from '../../components/ui/index.jsx'
-import { deleteBankApplicationCascade, supabase } from '../../lib/supabase.js'
+import { deleteBankApplicationCascade, deleteBankApplicationsCascade, supabase } from '../../lib/supabase.js'
 import { formatDate, formatINR } from '../../lib/utils.js'
 
 const uwStatuses = ['', 'Pending', 'In Review', 'Query Raised', 'Approved', 'Declined']
@@ -53,6 +53,9 @@ export default function BankApplicationList() {
   const [editing, setEditing] = useState(null)
   const [readOnly, setReadOnly] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
+  const [selectedIds, setSelectedIds] = useState(() => new Set())
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
 
   const form = useForm({
     defaultValues: {
@@ -332,6 +335,30 @@ export default function BankApplicationList() {
   }, [search, uwStatus, startDate, endDate])
 
   useEffect(() => {
+    setSelectedIds(new Set())
+  }, [pageIndex, pageSize, search, uwStatus, startDate, endDate])
+
+  const toggleRowSelected = useCallback((id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
+  const toggleAllSelected = useCallback((ids, shouldSelect) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      ids.forEach((id) => {
+        if (shouldSelect) next.add(id)
+        else next.delete(id)
+      })
+      return next
+    })
+  }, [])
+
+  useEffect(() => {
     const t = setTimeout(() => loadApps(), 250)
     return () => clearTimeout(t)
   }, [loadApps])
@@ -537,11 +564,31 @@ export default function BankApplicationList() {
         <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
       </div>
 
+      {selectedIds.size > 0 ? (
+        <div className="flex items-center justify-between rounded-md border border-border-divider bg-[#F5F5F3] px-4 py-2">
+          <div className="text-[13px] text-text-secondary">{selectedIds.size} selected</div>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" size="sm" onClick={() => setSelectedIds(new Set())}>
+              Clear
+            </Button>
+            <Button variant="danger" size="sm" onClick={() => setBulkDeleteOpen(true)}>
+              <Trash2 size={16} />
+              <span>Delete Selected</span>
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       <Table
         columns={columns}
         data={apps}
         loading={loading}
         emptyIcon={Building2}
+        selection={{
+          selectedIds,
+          onToggleRow: toggleRowSelected,
+          onToggleAll: toggleAllSelected,
+        }}
         pagination={{
           pageIndex,
           pageSize,
@@ -740,6 +787,30 @@ export default function BankApplicationList() {
             await loadApps()
           } catch (e) {
             toast.error(e?.message || 'Failed to delete')
+          }
+        }}
+      />
+
+      <ConfirmDialog
+        open={bulkDeleteOpen}
+        title="Delete selected applications?"
+        description={`This will permanently delete ${selectedIds.size} application${selectedIds.size === 1 ? '' : 's'} and any linked disbursements.`}
+        confirmText={bulkDeleting ? 'Deleting…' : 'Delete'}
+        onClose={() => {
+          if (bulkDeleting) return
+          setBulkDeleteOpen(false)
+        }}
+        onConfirm={async () => {
+          setBulkDeleting(true)
+          try {
+            await deleteBankApplicationsCascade(Array.from(selectedIds))
+            toast.success('Selected applications deleted')
+            setSelectedIds(new Set())
+            await loadApps()
+          } catch (e) {
+            toast.error(e?.message || 'Failed to delete selected applications')
+          } finally {
+            setBulkDeleting(false)
           }
         }}
       />

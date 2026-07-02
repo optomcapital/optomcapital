@@ -1,10 +1,17 @@
-import { Eye, EyeOff } from 'lucide-react'
-import { forwardRef, useEffect, useState } from 'react'
+import { Eye, EyeOff, ShieldCheck } from 'lucide-react'
+import { forwardRef, useCallback, useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import toast from 'react-hot-toast'
 import { useAuth } from '../../context/AuthContext.jsx'
-import { Button, Card, Input } from '../../components/ui/index.jsx'
-import { supabase, supabaseConfigured } from '../../lib/supabase.js'
+import { Button, Card, ConfirmDialog, Input } from '../../components/ui/index.jsx'
+import {
+  challengeAndVerifyMfaFactor,
+  enrollMfaFactor,
+  listMfaFactors,
+  supabase,
+  supabaseConfigured,
+  unenrollMfaFactor,
+} from '../../lib/supabase.js'
 
 const PasswordField = forwardRef(function PasswordField({ label, show, onToggle, error, ...props }, ref) {
   return (
@@ -33,6 +40,176 @@ const PasswordField = forwardRef(function PasswordField({ label, show, onToggle,
     </div>
   )
 })
+
+function TwoFactorCard() {
+  const [loadingFactors, setLoadingFactors] = useState(true)
+  const [factors, setFactors] = useState([])
+  const [enrollment, setEnrollment] = useState(null)
+  const [code, setCode] = useState('')
+  const [verifying, setVerifying] = useState(false)
+  const [enrolling, setEnrolling] = useState(false)
+  const [unenrollTarget, setUnenrollTarget] = useState(null)
+
+  const loadFactors = useCallback(async () => {
+    if (!supabaseConfigured) {
+      setLoadingFactors(false)
+      return
+    }
+    setLoadingFactors(true)
+    try {
+      const list = await listMfaFactors()
+      setFactors(list)
+    } catch (e) {
+      toast.error(e?.message || 'Failed to load 2FA status')
+    } finally {
+      setLoadingFactors(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadFactors()
+  }, [loadFactors])
+
+  const verifiedFactor = factors.find((f) => f.status === 'verified')
+
+  async function startEnroll() {
+    setEnrolling(true)
+    try {
+      const data = await enrollMfaFactor()
+      setEnrollment(data)
+    } catch (e) {
+      toast.error(e?.message || 'Failed to start 2FA enrollment')
+    } finally {
+      setEnrolling(false)
+    }
+  }
+
+  async function verifyEnrollment() {
+    if (!enrollment?.id) return
+    setVerifying(true)
+    try {
+      await challengeAndVerifyMfaFactor(enrollment.id, code.trim())
+      toast.success('Two-factor authentication enabled')
+      setEnrollment(null)
+      setCode('')
+      await loadFactors()
+    } catch (e) {
+      toast.error(e?.message || 'Invalid code, please try again')
+    } finally {
+      setVerifying(false)
+    }
+  }
+
+  async function cancelEnrollment() {
+    if (enrollment?.id) {
+      try {
+        await unenrollMfaFactor(enrollment.id)
+      } catch (e) {
+        void e
+      }
+    }
+    setEnrollment(null)
+    setCode('')
+  }
+
+  if (!supabaseConfigured) {
+    return (
+      <Card title="Two-Factor Authentication">
+        <div className="text-[13px] text-text-secondary">
+          2FA is available once this app is connected to Supabase (guest mode has no server-side auth).
+        </div>
+      </Card>
+    )
+  }
+
+  return (
+    <Card title="Two-Factor Authentication">
+      <div className="space-y-4">
+        <div className="flex items-start gap-2 rounded-md border border-border-divider bg-bg px-3 py-2 text-[12px] text-text-secondary">
+          <ShieldCheck size={16} className="mt-0.5 shrink-0 text-accent" />
+          <span>
+            Adds a second step at sign-in using an authenticator app. Even someone with database access can&apos;t sign in
+            as you without this code.
+          </span>
+        </div>
+
+        {loadingFactors ? (
+          <div className="text-[13px] text-text-secondary">Checking status…</div>
+        ) : enrollment ? (
+          <div className="space-y-3">
+            <div className="text-[13px] text-text-secondary">
+              Scan this QR code with an authenticator app (Google Authenticator, Authy, 1Password), then enter the 6-digit
+              code it generates.
+            </div>
+            {enrollment.totp?.qr_code ? (
+              <img src={enrollment.totp.qr_code} alt="2FA QR code" className="h-40 w-40 rounded-md border border-border-divider" />
+            ) : null}
+            {enrollment.totp?.secret ? (
+              <div className="text-[12px] text-text-muted">
+                Can&apos;t scan? Enter this key manually: <span className="font-mono">{enrollment.totp.secret}</span>
+              </div>
+            ) : null}
+            <div className="max-w-[220px]">
+              <Input
+                label="6-digit code"
+                inputMode="numeric"
+                maxLength={6}
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button onClick={verifyEnrollment} disabled={verifying || code.trim().length < 6}>
+                {verifying ? 'Verifying…' : 'Verify & Enable'}
+              </Button>
+              <Button variant="secondary" onClick={cancelEnrollment} disabled={verifying}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : verifiedFactor ? (
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-[13px] font-medium text-text-primary">Enabled</div>
+              <div className="text-[12px] text-text-secondary">Authenticator app is required at every sign-in.</div>
+            </div>
+            <Button variant="danger" onClick={() => setUnenrollTarget(verifiedFactor)}>
+              Disable
+            </Button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-[13px] font-medium text-text-primary">Not enabled</div>
+              <div className="text-[12px] text-text-secondary">Your account only requires a password to sign in.</div>
+            </div>
+            <Button onClick={startEnroll} disabled={enrolling}>
+              {enrolling ? 'Starting…' : 'Enable 2FA'}
+            </Button>
+          </div>
+        )}
+      </div>
+
+      <ConfirmDialog
+        open={!!unenrollTarget}
+        title="Disable two-factor authentication?"
+        description="Your account will only require a password to sign in. This is not recommended if credential exposure is a concern."
+        confirmText="Disable"
+        onClose={() => setUnenrollTarget(null)}
+        onConfirm={async () => {
+          try {
+            await unenrollMfaFactor(unenrollTarget.id)
+            toast.success('Two-factor authentication disabled')
+            setUnenrollTarget(null)
+            await loadFactors()
+          } catch (e) {
+            toast.error(e?.message || 'Failed to disable 2FA')
+          }
+        }}
+      />
+    </Card>
+  )
+}
 
 export default function SettingsPage() {
   const { user } = useAuth()
@@ -167,6 +344,8 @@ export default function SettingsPage() {
           </div>
         </div>
       </Card>
+
+      <TwoFactorCard />
 
       <Card title="Change Email">
         <form onSubmit={emailForm.handleSubmit(onChangeEmail)} className="space-y-4">

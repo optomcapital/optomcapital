@@ -39,11 +39,11 @@ function AppBlockedScreen() {
 }
 
 function PrivateRoute({ children }) {
-  const { user, loading } = useAuth()
+  const { user, loading, mfaPending } = useAuth()
   const location = useLocation()
 
   if (loading) return null
-  if (!user) return <Navigate to="/login" replace state={{ from: location.pathname }} />
+  if (!user || mfaPending) return <Navigate to="/login" replace state={{ from: location.pathname }} />
   return children
 }
 

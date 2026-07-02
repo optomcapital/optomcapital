@@ -286,7 +286,7 @@ export function Pagination({ table, pageSizeOptions = [10, 25, 50] }) {
   )
 }
 
-export function Table({ columns, data, loading, emptyIcon, onRowClick, pagination }) {
+export function Table({ columns, data, loading, emptyIcon, onRowClick, pagination, selection }) {
   const safeData = data || []
 
   const isServer = Boolean(pagination)
@@ -323,14 +323,33 @@ export function Table({ columns, data, loading, emptyIcon, onRowClick, paginatio
   })
 
   const rows = table.getRowModel().rows
+  const getRowId = selection?.getRowId || ((row) => row.id)
+  const selectedIds = selection?.selectedIds
+  const pageRowIds = rows.map((row) => getRowId(row.original)).filter((id) => id != null)
+  const allPageSelected = Boolean(selection) && pageRowIds.length > 0 && pageRowIds.every((id) => selectedIds?.has(id))
+  const somePageSelected = Boolean(selection) && pageRowIds.some((id) => selectedIds?.has(id))
+  const colSpan = columns.length + (selection ? 1 : 0)
 
   return (
     <div className="rounded-panel border border-border-subtle bg-surface shadow-panel">
-      <div className="overflow-auto">
+      <div className="max-h-[calc(100vh-320px)] overflow-auto">
         <table className="min-w-full text-left text-[13px]">
-          <thead className="sticky top-0 bg-surface">
+          <thead className="sticky top-0 z-[1] bg-surface">
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id} className="border-b border-border-divider">
+                {selection ? (
+                  <th className="w-10 px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={allPageSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = !allPageSelected && somePageSelected
+                      }}
+                      onChange={() => selection.onToggleAll?.(pageRowIds, !allPageSelected)}
+                      aria-label="Select all rows on this page"
+                    />
+                  </th>
+                ) : null}
                 {headerGroup.headers.map((header) => (
                   <th
                     key={header.id}
@@ -353,7 +372,7 @@ export function Table({ columns, data, loading, emptyIcon, onRowClick, paginatio
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={columns.length} className="px-4 py-6">
+                <td colSpan={colSpan} className="px-4 py-6">
                   <div className="space-y-2">
                     <Skeleton className="h-4 w-full" />
                     <Skeleton className="h-4 w-[85%]" />
@@ -363,27 +382,42 @@ export function Table({ columns, data, loading, emptyIcon, onRowClick, paginatio
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={columns.length} className="px-4 py-6">
+                <td colSpan={colSpan} className="px-4 py-6">
                   <EmptyState icon={emptyIcon} />
                 </td>
               </tr>
             ) : (
-              rows.map((row) => (
-                <tr
-                  key={row.id}
-                  className={[
-                    'border-b border-border-divider last:border-b-0 hover:bg-[#F5F5F3]',
-                    onRowClick ? 'cursor-pointer' : '',
-                  ].join(' ')}
-                  onClick={() => onRowClick?.(row.original)}
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="whitespace-nowrap px-4 py-3">
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </td>
-                  ))}
-                </tr>
-              ))
+              rows.map((row) => {
+                const rowId = getRowId(row.original)
+                const isSelected = Boolean(selection) && selectedIds?.has(rowId)
+                return (
+                  <tr
+                    key={row.id}
+                    className={[
+                      'border-b border-border-divider last:border-b-0 hover:bg-[#F5F5F3]',
+                      onRowClick ? 'cursor-pointer' : '',
+                      isSelected ? 'bg-blue-50/60' : '',
+                    ].join(' ')}
+                    onClick={() => onRowClick?.(row.original)}
+                  >
+                    {selection ? (
+                      <td className="w-10 px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => selection.onToggleRow?.(rowId)}
+                          aria-label="Select row"
+                        />
+                      </td>
+                    ) : null}
+                    {row.getVisibleCells().map((cell) => (
+                      <td key={cell.id} className="whitespace-nowrap px-4 py-3">
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </td>
+                    ))}
+                  </tr>
+                )
+              })
             )}
           </tbody>
         </table>
@@ -402,6 +436,12 @@ Table.propTypes = {
     pageCount: PropTypes.number,
     onPageChange: PropTypes.func,
     onPageSizeChange: PropTypes.func,
+  }),
+  selection: PropTypes.shape({
+    selectedIds: PropTypes.instanceOf(Set),
+    onToggleRow: PropTypes.func,
+    onToggleAll: PropTypes.func,
+    getRowId: PropTypes.func,
   }),
 }
 
