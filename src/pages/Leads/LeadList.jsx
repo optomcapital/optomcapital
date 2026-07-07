@@ -5,7 +5,7 @@ import toast from 'react-hot-toast'
 import { useForm } from 'react-hook-form'
 import { useNavigate } from 'react-router-dom'
 import { Badge, Button, ConfirmDialog, Divider, Drawer, Input, Select, Table, Textarea } from '../../components/ui/index.jsx'
-import { deleteLeadCascade, supabase } from '../../lib/supabase.js'
+import { deleteLeadCascade, deleteLeadsCascade, supabase } from '../../lib/supabase.js'
 import { formatDate, formatINR, getStageColor } from '../../lib/utils.js'
 
 const stages = [
@@ -94,6 +94,9 @@ export default function LeadList() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [editing, setEditing] = useState(null)
   const [deleteTarget, setDeleteTarget] = useState(null)
+  const [selectedIds, setSelectedIds] = useState(() => new Set())
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
 
   const {
     register,
@@ -323,6 +326,30 @@ export default function LeadList() {
   useEffect(() => {
     setPageIndex(0)
   }, [search, searchBy, loanType, stage, urgency, leadStatusCategory, startDate, endDate, location])
+
+  useEffect(() => {
+    setSelectedIds(new Set())
+  }, [pageIndex, pageSize, search, searchBy, loanType, stage, urgency, leadStatusCategory, startDate, endDate, location])
+
+  const toggleRowSelected = useCallback((id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
+  const toggleAllSelected = useCallback((ids, shouldSelect) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      ids.forEach((id) => {
+        if (shouldSelect) next.add(id)
+        else next.delete(id)
+      })
+      return next
+    })
+  }, [])
 
   useEffect(() => {
     const t = setTimeout(() => loadLeads(), 250)
@@ -582,12 +609,32 @@ export default function LeadList() {
         <div className="col-span-3" />
       </div>
 
+      {selectedIds.size > 0 ? (
+        <div className="flex items-center justify-between rounded-md border border-border-divider bg-[#F5F5F3] px-4 py-2">
+          <div className="text-[13px] text-text-secondary">{selectedIds.size} selected</div>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" size="sm" onClick={() => setSelectedIds(new Set())}>
+              Clear
+            </Button>
+            <Button variant="danger" size="sm" onClick={() => setBulkDeleteOpen(true)}>
+              <Trash2 size={16} />
+              <span>Delete Selected</span>
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       <Table
         columns={columns}
         data={leads}
         loading={loading}
         emptyIcon={FileText}
         onRowClick={(row) => navigate(`/leads/${row.id}`)}
+        selection={{
+          selectedIds,
+          onToggleRow: toggleRowSelected,
+          onToggleAll: toggleAllSelected,
+        }}
         pagination={{
           pageIndex,
           pageSize,
@@ -675,6 +722,30 @@ export default function LeadList() {
             await loadLeads()
           } catch (e) {
             toast.error(e?.message || 'Failed to delete lead')
+          }
+        }}
+      />
+
+      <ConfirmDialog
+        open={bulkDeleteOpen}
+        title="Delete selected leads?"
+        description={`This will permanently delete ${selectedIds.size} lead${selectedIds.size === 1 ? '' : 's'} and all linked bank applications, disbursements, collateral, and documents.`}
+        confirmText={bulkDeleting ? 'Deleting…' : 'Delete'}
+        onClose={() => {
+          if (bulkDeleting) return
+          setBulkDeleteOpen(false)
+        }}
+        onConfirm={async () => {
+          setBulkDeleting(true)
+          try {
+            await deleteLeadsCascade(Array.from(selectedIds))
+            toast.success('Selected leads deleted')
+            setSelectedIds(new Set())
+            await loadLeads()
+          } catch (e) {
+            toast.error(e?.message || 'Failed to delete selected leads')
+          } finally {
+            setBulkDeleting(false)
           }
         }}
       />

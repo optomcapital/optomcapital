@@ -325,7 +325,10 @@ export function Table({ columns, data, loading, emptyIcon, onRowClick, paginatio
   const rows = table.getRowModel().rows
   const getRowId = selection?.getRowId || ((row) => row.id)
   const selectedIds = selection?.selectedIds
-  const pageRowIds = rows.map((row) => getRowId(row.original)).filter((id) => id != null)
+  const pageRowIds = rows
+    .filter((row) => !selection?.isRowDisabled?.(row.original))
+    .map((row) => getRowId(row.original))
+    .filter((id) => id != null)
   const allPageSelected = Boolean(selection) && pageRowIds.length > 0 && pageRowIds.every((id) => selectedIds?.has(id))
   const somePageSelected = Boolean(selection) && pageRowIds.some((id) => selectedIds?.has(id))
   const colSpan = columns.length + (selection ? 1 : 0)
@@ -390,6 +393,7 @@ export function Table({ columns, data, loading, emptyIcon, onRowClick, paginatio
               rows.map((row) => {
                 const rowId = getRowId(row.original)
                 const isSelected = Boolean(selection) && selectedIds?.has(rowId)
+                const isRowDisabled = Boolean(selection?.isRowDisabled?.(row.original))
                 return (
                   <tr
                     key={row.id}
@@ -405,6 +409,8 @@ export function Table({ columns, data, loading, emptyIcon, onRowClick, paginatio
                         <input
                           type="checkbox"
                           checked={isSelected}
+                          disabled={isRowDisabled}
+                          title={isRowDisabled ? selection.disabledTitle : undefined}
                           onChange={() => selection.onToggleRow?.(rowId)}
                           aria-label="Select row"
                         />
@@ -442,6 +448,8 @@ Table.propTypes = {
     onToggleRow: PropTypes.func,
     onToggleAll: PropTypes.func,
     getRowId: PropTypes.func,
+    isRowDisabled: PropTypes.func,
+    disabledTitle: PropTypes.string,
   }),
 }
 

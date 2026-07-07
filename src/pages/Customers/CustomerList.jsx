@@ -5,7 +5,7 @@ import toast from 'react-hot-toast'
 import { useForm } from 'react-hook-form'
 import { useNavigate } from 'react-router-dom'
 import { Button, ConfirmDialog, Divider, Drawer, Input, Modal, Select, Table, Textarea, Toggle } from '../../components/ui/index.jsx'
-import { deleteCustomerCascade, supabase } from '../../lib/supabase.js'
+import { deleteCustomerCascade, deleteCustomersCascade, supabase } from '../../lib/supabase.js'
 import { downloadCsv, formatDate, getScoreColor, isOverdue, writeClipboardText } from '../../lib/utils.js'
 
 const entityOptions = [
@@ -99,6 +99,9 @@ export default function CustomerList() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [editing, setEditing] = useState(null)
   const [deleteTarget, setDeleteTarget] = useState(null)
+  const [selectedIds, setSelectedIds] = useState(() => new Set())
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
   const [messageOpen, setMessageOpen] = useState(false)
   const [messageTarget, setMessageTarget] = useState(null)
   const [messageDraft, setMessageDraft] = useState('')
@@ -339,6 +342,30 @@ export default function CustomerList() {
   useEffect(() => {
     setPageIndex(0)
   }, [search, searchBy, entityType, professionType, employmentType, customerType, productOffering, location])
+
+  useEffect(() => {
+    setSelectedIds(new Set())
+  }, [pageIndex, pageSize, search, searchBy, entityType, professionType, employmentType, customerType, productOffering, location])
+
+  const toggleRowSelected = useCallback((id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
+  const toggleAllSelected = useCallback((ids, shouldSelect) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      ids.forEach((id) => {
+        if (shouldSelect) next.add(id)
+        else next.delete(id)
+      })
+      return next
+    })
+  }, [])
 
   useEffect(() => {
     const t = setTimeout(() => loadCustomers(), 250)
@@ -1169,12 +1196,32 @@ export default function CustomerList() {
         )}
       </div>
 
+      {selectedIds.size > 0 ? (
+        <div className="flex items-center justify-between rounded-md border border-border-divider bg-[#F5F5F3] px-4 py-2">
+          <div className="text-[13px] text-text-secondary">{selectedIds.size} selected</div>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" size="sm" onClick={() => setSelectedIds(new Set())}>
+              Clear
+            </Button>
+            <Button variant="danger" size="sm" onClick={() => setBulkDeleteOpen(true)}>
+              <Trash2 size={16} />
+              <span>Delete Selected</span>
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       <Table
         columns={columns}
         data={customers}
         loading={loading}
         emptyIcon={Users}
         onRowClick={(row) => navigate(`/customers/${row.id}`)}
+        selection={{
+          selectedIds,
+          onToggleRow: toggleRowSelected,
+          onToggleAll: toggleAllSelected,
+        }}
         pagination={{
           pageIndex,
           pageSize,
@@ -1555,6 +1602,30 @@ export default function CustomerList() {
             await loadCustomers()
           } catch (e) {
             toast.error(e?.message || 'Failed to delete customer')
+          }
+        }}
+      />
+
+      <ConfirmDialog
+        open={bulkDeleteOpen}
+        title="Delete selected customers?"
+        description={`This will permanently delete ${selectedIds.size} customer${selectedIds.size === 1 ? '' : 's'} and all linked leads, bank applications, disbursements, collateral, and documents.`}
+        confirmText={bulkDeleting ? 'Deleting…' : 'Delete'}
+        onClose={() => {
+          if (bulkDeleting) return
+          setBulkDeleteOpen(false)
+        }}
+        onConfirm={async () => {
+          setBulkDeleting(true)
+          try {
+            await deleteCustomersCascade(Array.from(selectedIds))
+            toast.success('Selected customers deleted')
+            setSelectedIds(new Set())
+            await loadCustomers()
+          } catch (e) {
+            toast.error(e?.message || 'Failed to delete selected customers')
+          } finally {
+            setBulkDeleting(false)
           }
         }}
       />

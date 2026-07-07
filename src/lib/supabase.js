@@ -1182,6 +1182,16 @@ export async function deleteLeadCascade(leadId) {
   if (error) throw error
 }
 
+export async function deleteLeadsCascade(leadIds) {
+  const ids = (leadIds || []).filter(Boolean)
+  if (!ids.length) return
+  await deleteWhereIn('documents', 'lead_id', ids)
+  await deleteWhereIn('disbursements', 'lead_id', ids)
+  await deleteWhereIn('bank_applications', 'lead_id', ids)
+  await deleteWhereIn('collateral', 'lead_id', ids)
+  await deleteWhereIn('leads', 'id', ids)
+}
+
 export async function deleteCustomerCascade(customerId) {
   if (!customerId) throw new Error('Missing customer id')
 
@@ -1213,6 +1223,43 @@ export async function deleteCustomerCascade(customerId) {
 
   const { error } = await supabase.from('customers').delete().eq('id', customerId)
   if (error) throw error
+}
+
+export async function deleteCustomersCascade(customerIds) {
+  const ids = (customerIds || []).filter(Boolean)
+  if (!ids.length) return
+
+  await deleteWhereIn('documents', 'customer_id', ids)
+
+  const leadIds = []
+  const chunks = chunkArray(ids, 500)
+  for (const group of chunks) {
+    const res = await supabase.from('leads').select('id').in('customer_id', group).range(0, 9999)
+    if (res.error) throw res.error
+    leadIds.push(...(res.data || []).map((r) => r.id).filter(Boolean))
+  }
+
+  if (leadIds.length) {
+    await deleteWhereIn('documents', 'lead_id', leadIds)
+    await deleteWhereIn('disbursements', 'lead_id', leadIds)
+    await deleteWhereIn('bank_applications', 'lead_id', leadIds)
+    await deleteWhereIn('collateral', 'lead_id', leadIds)
+    await deleteWhereIn('leads', 'id', leadIds)
+  }
+
+  await deleteWhereIn('customers', 'id', ids)
+}
+
+export async function deleteDisbursementsBulk(disbursementIds) {
+  const ids = (disbursementIds || []).filter(Boolean)
+  if (!ids.length) return
+  await deleteWhereIn('disbursements', 'id', ids)
+}
+
+export async function deleteBankRelationshipsBulk(relationshipIds) {
+  const ids = (relationshipIds || []).filter(Boolean)
+  if (!ids.length) return
+  await deleteWhereIn('bank_relationships', 'id', ids)
 }
 
 export async function signIn(email, password) {

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 import { useForm } from 'react-hook-form'
 import { Badge, Button, ConfirmDialog, Drawer, Input, Select, Table, Textarea } from '../../components/ui/index.jsx'
-import { supabase } from '../../lib/supabase.js'
+import { deleteBankRelationshipsBulk, supabase } from '../../lib/supabase.js'
 import { downloadCsv, formatDate } from '../../lib/utils.js'
 
 const columnHelper = createColumnHelper()
@@ -40,6 +40,9 @@ export default function RelationshipsPage() {
   const [editing, setEditing] = useState(null)
   const [readOnly, setReadOnly] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
+  const [selectedIds, setSelectedIds] = useState(() => new Set())
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [importFileName, setImportFileName] = useState('')
   const [importPreview, setImportPreview] = useState([])
@@ -458,6 +461,30 @@ export default function RelationshipsPage() {
   }, [search, searchBy, locationFilter])
 
   useEffect(() => {
+    setSelectedIds(new Set())
+  }, [pageIndex, pageSize, search, searchBy, locationFilter])
+
+  const toggleRowSelected = useCallback((id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
+  const toggleAllSelected = useCallback((ids, shouldSelect) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      ids.forEach((id) => {
+        if (shouldSelect) next.add(id)
+        else next.delete(id)
+      })
+      return next
+    })
+  }, [])
+
+  useEffect(() => {
     const t = setTimeout(() => loadRows(), 250)
     return () => clearTimeout(t)
   }, [loadRows])
@@ -784,10 +811,32 @@ export default function RelationshipsPage() {
         />
       </div>
 
+      {selectedIds.size > 0 ? (
+        <div className="flex items-center justify-between rounded-md border border-border-divider bg-[#F5F5F3] px-4 py-2">
+          <div className="text-[13px] text-text-secondary">{selectedIds.size} selected</div>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" size="sm" onClick={() => setSelectedIds(new Set())}>
+              Clear
+            </Button>
+            <Button variant="danger" size="sm" onClick={() => setBulkDeleteOpen(true)}>
+              <Trash2 size={16} />
+              <span>Delete Selected</span>
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       <Table
         data={rows}
         columns={columns}
         loading={loading}
+        selection={{
+          selectedIds,
+          onToggleRow: toggleRowSelected,
+          onToggleAll: toggleAllSelected,
+          isRowDisabled: (row) => Boolean(row?.__derived),
+          disabledTitle: 'Only master rows can be selected',
+        }}
         pagination={{
           pageIndex,
           pageSize,
@@ -1138,6 +1187,30 @@ export default function RelationshipsPage() {
         confirmText="Delete"
         onClose={() => setDeleteTarget(null)}
         onConfirm={deleteRow}
+      />
+
+      <ConfirmDialog
+        open={bulkDeleteOpen}
+        title="Delete selected relationships?"
+        description={`This will permanently delete ${selectedIds.size} RM/bank ${selectedIds.size === 1 ? 'entry' : 'entries'}.`}
+        confirmText={bulkDeleting ? 'Deleting…' : 'Delete'}
+        onClose={() => {
+          if (bulkDeleting) return
+          setBulkDeleteOpen(false)
+        }}
+        onConfirm={async () => {
+          setBulkDeleting(true)
+          try {
+            await deleteBankRelationshipsBulk(Array.from(selectedIds))
+            toast.success('Selected relationships deleted')
+            setSelectedIds(new Set())
+            await loadRows()
+          } catch (e) {
+            toast.error(e?.message || 'Failed to delete selected relationships')
+          } finally {
+            setBulkDeleting(false)
+          }
+        }}
       />
     </div>
   )
