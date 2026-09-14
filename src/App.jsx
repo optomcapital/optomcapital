@@ -15,6 +15,7 @@ import DisbursementList from './pages/Disbursements/DisbursementList.jsx'
 import ReportsPage from './pages/Reports/ReportsPage.jsx'
 import RelationshipsPage from './pages/Relationships/RelationshipsPage.jsx'
 import SettingsPage from './pages/Settings/SettingsPage.jsx'
+import MonitoringPage from './pages/Monitoring/MonitoringPage.jsx'
 
 function AppBlockedScreen() {
   const { logout } = useAuth()
@@ -74,6 +75,7 @@ export default function App() {
         <Route path="relationships" element={<RelationshipsPage />} />
         <Route path="disbursements" element={<DisbursementList />} />
         <Route path="reports" element={<ReportsPage />} />
+        <Route path="monitoring" element={<MonitoringPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
