@@ -211,18 +211,20 @@ function UptimeTab() {
     () => [
       columnHelper.accessor('name', { header: 'Name', cell: (info) => info.getValue() || '—' }),
       columnHelper.accessor('url', { header: 'URL', cell: (info) => info.getValue() || '—' }),
-      columnHelper.accessor((row) => row.status ?? row.uptimeStatus, {
-        id: 'status',
-        header: 'Status',
+      columnHelper.accessor('status', {
+        header: 'Monitor',
         cell: (info) => {
+          // Sentry's `status` here means "is this monitor enabled and
+          // checking", not "is the site currently up" — an actual outage
+          // shows up as a new Issue in the Issues tab instead.
           const v = String(info.getValue() || 'unknown').toLowerCase()
           const color =
-            v === 'ok' || v === 'up'
+            v === 'active'
               ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-              : v === 'failed' || v === 'down'
-                ? 'bg-rose-50 text-rose-700 border-rose-200'
-                : 'bg-slate-50 text-slate-700 border-border-divider'
-          return <Badge text={v} colorClass={color} />
+              : v === 'disabled'
+                ? 'bg-slate-50 text-slate-700 border-border-divider'
+                : 'bg-amber-50 text-amber-700 border-amber-200'
+          return <Badge text={v === 'active' ? 'checking' : v} colorClass={color} />
         },
       }),
       columnHelper.accessor((row) => row.intervalSeconds ?? row.interval_seconds, {
