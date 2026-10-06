@@ -5,8 +5,8 @@
 // operations (never a raw passthrough), so the frontend can't do more than
 // intended even if the client bundle were somehow tampered with.
 //
-// Confirmed against the live Sentry org (org slug "optom-capital", project
-// slug "optomcapital") before writing this:
+// Confirmed against the live Sentry org (org slug "sbd-lk", project
+// slug "optom-capital") before writing this:
 //   Issues  — list:   GET  /projects/{org}/{project}/issues/
 //             update: PUT  /organizations/{org}/issues/{id}/   { status }
 //             delete: DELETE /organizations/{org}/issues/{id}/
@@ -18,8 +18,8 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 
 const SENTRY_API_TOKEN = Deno.env.get('SENTRY_API_TOKEN')
-const SENTRY_ORG = Deno.env.get('SENTRY_ORG') ?? 'optom-capital'
-const SENTRY_PROJECT = Deno.env.get('SENTRY_PROJECT') ?? 'optomcapital'
+const SENTRY_ORG = Deno.env.get('SENTRY_ORG') ?? 'sbd-lk'
+const SENTRY_PROJECT = Deno.env.get('SENTRY_PROJECT') ?? 'optom-capital'
 const SENTRY_API = 'https://sentry.io/api/0'
 
 const corsHeaders = {
